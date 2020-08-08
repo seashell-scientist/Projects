@@ -1,0 +1,582 @@
+---
+title: "6306 Case Study 2 v2"
+author: "Jonathan Tan"
+date: "8/13/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Analytics Report for DDSAnalytics on Employee Turnover
+Predicting Attrition Rates
+Models compared: logistic regression, KNN
+
+Predicting Employee Salary
+Models used: linear regression
+
+Outline: tackle attrition prediction, then salary prediction
+
+
+#Modeling Employee Attrition Rates
+using Naive Bayes and KNN
+
+```{r data import1}
+nadata1 <- read.csv("D:/SMU/DS 6306 Doing Data Science/DS_6306_case_study_01/MSDS-6306-Doing-Data-Science/UNIT 14/CaseStudy2CompSet No Attrition.csv")
+nsdata1 <- readxl::read_xlsx("D:/SMU/DS 6306 Doing Data Science/DS_6306_case_study_01/MSDS-6306-Doing-Data-Science/UNIT 14/CaseStudy2CompSet No Salary.xlsx")
+maindata <- read.csv("D:/SMU/DS 6306 Doing Data Science/DS_6306_case_study_01/MSDS-6306-Doing-Data-Science/UNIT 14/CaseStudy2-data.csv")
+#maindata is going to be split into test/train sets, then apply to na/ns data to guess salary and attrition rate
+
+library(caret)
+library(ggplot2)
+
+```
+
+```{r split data }
+library(caTools)
+set.seed(858)
+sampleset = sample.split(maindata, SplitRatio = 0.7)
+traindata <- subset(maindata, sampleset == TRUE)
+testdata = subset(maindata, sampleset == FALSE)
+#still ends up with different set sizes if not seeded
+```
+
+```{r numeric maindata}
+numcolumns <- unlist(lapply(maindata, is.numeric))
+num.maindata <- maindata[, numcolumns]
+```
+
+```{r vis1}
+#correlation matrix
+big.cor.matrix <- cor(num.maindata) #??? 
+```
+
+```{r vis2}
+library(ggplot2)
+ggplot(traindata, aes(x = YearsAtCompany, fill = Attrition)) +
+  geom_bar(aes(y = (..count..)/sum(..count..)), alpha = 0.5) +
+  ylab("% ?") +
+  labs(title="Years Employed",x="Years",y="Attrition Rate")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+  #lab techs, research sci, sales exec, and sales rep have higher attrition rates than the rest? 
+```
+
+```{r vis3}
+ggplot(data = maindata, mapping = aes(x = JobRole, y = HourlyRate, fill = Attrition)) + 
+  geom_boxplot()+
+  labs(title="Hourly Rate vs Job Role with Attrition",x="Job Role",y="Hourly Rate ($)")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+#certain job roles, sales rep, research sci, sales exec,have higher attrition rate, so job role may be a factor
+#conversely, 
+```
+
+```{r vis4}
+ggplot(data = maindata, mapping = aes(x =Education , y = JobSatisfaction , fill = Attrition)) + 
+  geom_smooth() +
+  labs(title = "Education vs Job Satisfaction", x = "Education Level")
+#job satisfaction correlates with attrition rate, education not as much? 
+```
+```{r vis 4.2}
+#are certain departments/roles significantly more educated than others?
+ggplot(data = maindata, aes(x = JobRole, y = Education, color = Attrition)) +
+  geom_boxplot() +
+  labs(title="Education by Role",x="Job Role",y="Education")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+#only the research director role has more educated people quitting than staying, but it looks like almost no-one is staying in that role
+#education distribution for remainers is relatively constant, except hr where it is lower
+#education distribution for people who quit is constant except for sales rep and healthcare rep
+#look in to job satisfaction by role
+```
+
+
+```{r vis 4.3}
+ggplot(data = maindata, aes(x = JobRole, y = JobSatisfaction, fill = Attrition)) + 
+  geom_boxplot()+
+  labs(title="Job Satisfaction by Role",x="Job Role",y="Satisfaction")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+#satifaction seems unsurprisingly high for those who stay, and lower for those who leave
+#research directors are looking pretty unhappy as a whole
+
+```
+
+
+```{r vis 5}
+ggplot(data = maindata, mapping = aes(x = PercentSalaryHike , y =YearsSinceLastPromotion, color = maindata$Attrition ))+
+  geom_point()+
+  labs(title = "%Salary Hike vs Years Since Last Promotion", x = "Years", y = "%Salary Hike") 
+```
+
+```{r vis6}
+ggplot(data = maindata, aes(x = PerformanceRating, y = RelationshipSatisfaction, fill = Attrition)) +
+  geom_col() +
+  labs(title = "Performance Rating vs Relationship Satisfaction")
+#performance rating isn't useful, only 3's and 4's
+```
+
+```{r vis7}
+ggplot(data = maindata) + 
+  geom_smooth(mapping = aes(x = Education, y = MonthlyIncome)) +
+  labs(title = "Education vs Salary")
+#more education correlates with higher salary, no surprise here
+```
+```{r vis 8}
+ggplot(data = maindata, aes(x = MonthlyIncome, y = WorkLifeBalance , color = Attrition)) +
+  geom_hex()+
+  labs( title = "Income vs Work-Life Balance")
+```
+
+```{r vis9}
+ggplot(data = maindata) +
+  geom_point(mapping = aes(x = Age, y = MonthlyIncome, color = JobRole))+
+  facet_wrap(~JobRole)
+ 
+#managers/research directors correlate with older, better paid employees
+```
+
+```{r vis 10}
+ggplot(data = maindata) + 
+  geom_point(mapping = aes(x = YearsInCurrentRole, y = YearsAtCompany, color = Attrition))+
+  facet_wrap(~JobRole)
+#most have been at the same role the whole duration of employment at thier company
+#some senior positions, manager, manu. director, research director, sales exec, have employees who have been in a different role than thier current one, but that doesn't neccessarily correlate to attrition rate
+```
+
+```{r vis10.1}
+ggplot(data = maindata) + 
+  geom_point(mapping = aes(x = YearsInCurrentRole, y = YearsAtCompany, color = Attrition))+
+  facet_wrap(~MaritalStatus)+
+  labs(title = "Time Spent in Same Role")
+#discard Marital status as meaninful variable
+```
+
+
+```{r vis 10.2}
+ggplot(data = maindata) + 
+  geom_point(mapping = aes(x = MonthlyRate, y = MonthlyIncome, color = Attrition))+
+  facet_wrap(~StockOptionLevel) +
+  labs(title = "Stock Option Level vs Income")
+#discard Stock Options as a meaningful variable
+```
+
+```{r vis 10.3}
+ggplot(data = maindata) + 
+  geom_bar(mapping = aes(x = YearsWithCurrManager,  color = Attrition))+
+facet_wrap(~JobRole)
+#many employees who quit have had 2 to 0 years with thier current manager, indicating manager employee relationship may have an impact on attrition, particurarly with lab tech, research scientists, and sales reps
+```
+
+
+##Naive Bayes Section
+Variables chosen -  JobSatisfaction, JobRole, Age, Education, YearsAtCompany, HourlyRate, NumCompaniesWorked
+```{r address assumptions - normality}
+#install.packages("nortest")
+library(nortest)
+ad.test(maindata$JobSatisfaction)
+ad.test(maindata$NumCompaniesWorked)
+ad.test(maindata$Age)
+ad.test(maindata$Education)
+ad.test(maindata$HourlyRate)
+ad.test(maindata$DistanceFromHome)
+ad.test(maindata$YearsAtCompany)
+ad.test(maindata$YearsSinceLastPromotion)
+```
+
+```{r NB1}
+#install.packages("e1071")
+library(e1071)
+attach(traindata)
+
+formula.vars = Attrition ~ JobSatisfaction + JobRole + Age + Education + YearsAtCompany + HourlyRate 
+
+nb.class2 = naiveBayes(formula.vars, data = traindata)
+#print(nb.class1)
+detach(traindata)
+```
+
+```{r function train predict}
+model.train.predictions = function(model) 
+                         {
+                           trainPred=predict(model, newdata = traindata, type = "class")
+                           trainTable=table(traindata$Attrition, trainPred)
+                           trainAcc=(trainTable[1,1]+trainTable[2,2])/sum(trainTable)
+                           #return(trainPred) #integer list
+                           #return(trainTable) #integer table
+                           #return(trainAcc) #just one double
+                           return(list(train.predictions = trainPred, train.table = trainTable, train.accuracy = trainAcc))
+                         }
+```
+
+```{r function test predict}
+model.test.predictions = function(model) 
+                         {
+                           testPred=predict(nb.class1, newdata=testdata, type="class")
+                           testTable=table(testdata$Attrition, testPred)
+                           testAcc=(testTable[1,1]+testTable[2,2])/sum(testTable)
+                          
+                           return(list(test.predictions = testPred, test.table = testTable, test.accuracy = testAcc))
+                         }
+```
+
+```{r function test and train predict}
+#actually i should just combine this stuff, return train prediction, test predictions, tables, and accuracy of both
+tt.predictions = function(model)
+{
+  trainPred=predict(model, newdata = traindata, type = "class")
+  trainTable=table(traindata$Attrition, trainPred)
+  trainAcc=(trainTable[1,1]+trainTable[2,2])/sum(trainTable)
+  
+  testPred=predict(model, newdata=testdata, type="class")
+  testTable=table(testdata$Attrition, testPred)
+  testAcc=(testTable[1,1]+testTable[2,2])/sum(testTable)
+  
+  return(list(train.predictions = trainPred, 
+              test.predictions = testPred, 
+              train.table = trainTable, 
+              test.table = testTable,
+              train.accuracy = trainAcc, 
+              test.accuracy = testAcc))
+}
+```
+
+```{r basic model evalutation}
+predictions1 <-  tt.predictions(nb.class2)
+predictions1 <-  tt.predictions(nb.class2)
+predictions1$train.table
+predictions1$test.table
+predictions1$train.accuracy
+predictions1$test.accuracy
+```
+
+```{r looping iteration stuff p1}
+#iterate multiple splits, take average accuracy of training and testing predictions
+n = 100 #number of different split sets to process 
+m = seq(n)
+trainingAcc <- vector()
+testingAcc <- vector()
+
+for(i in m)
+{
+  sampleset = sample.split(maindata, SplitRatio = 0.7)
+  traindata <- subset(maindata, sampleset == TRUE)
+  testdata = subset(maindata, sampleset == FALSE)
+  
+  attach(traindata)
+  formula.vars = Attrition ~ JobSatisfaction + JobRole + Age + Education + YearsAtCompany + HourlyRate + NumCompaniesWorked
+  detach(traindata)
+  nb.class3 = naiveBayes(formula.vars , data = traindata)
+  
+  x <- tt.predictions(nb.class3)
+  
+  trainingAcc <- cbind( trainingAcc, x$train.accuracy)
+  testingAcc <- cbind( testingAcc, x$test.accuracy)
+}
+mean.train.acc = mean(trainingAcc)
+mean.test.acc = mean(testingAcc)
+
+sprintf("Splits Tested = %i", n)
+sprintf("Mean Training Set Accuracy = %f", mean.train.acc)
+sprintf("Mean Testing Set Accuracy = %f", mean.test.acc)
+```
+We can see that average accuracy isn't bad, though there may be overfitting
+
+```{r sensitivity analysis1}
+#library(caret)
+#reminder, sensitivity is the rate of correct "positive" guesses
+#specificity is the rate of correct "negative" classifications/guesses
+#confusionMatrix(predictions1$train.predictions, traindata$Attrition)
+
+```
+Sensitivity is high, and specificity is low, indicates overfitting/inaccurate model
+
+```{r apply model to no attrition dataset}
+tt.prediction2 = function(model)
+{
+ # trainPred=predict(model, newdata = traindata, type = "class")
+  #trainTable=table(traindata$Attrition, trainPred)
+  #trainAcc=(trainTable[1,1]+trainTable[2,2])/sum(trainTable)
+  
+  testPred=predict(model, newdata=nadata1, type="class")
+  #testTable=table(testdata$Attrition, testPred)
+  #testAcc=(testTable[1,1]+testTable[2,2])/sum(testTable)
+  
+  return(list( #train.predictions = trainPred, 
+              test.predictions = testPred)) 
+             # train.table = trainTable, 
+              #test.table = testTable,
+             # train.accuracy = trainAcc, 
+             # test.accuracy = testAcc))
+}
+nadata1.predictions <- tt.prediction2(nb.class3)
+```
+
+```{r export csv}
+nbpredictions1 <- data.frame(nadata1$ID, nadata1.predictions) #not sure how to exactly match case to ID, hope it's all in order
+names(nbpredictions1) <- c("ID", "Predicted Attrition")
+
+setwd("D:/SMU/DS 6306 Doing Data Science/CaseStudy2DDS_6306")
+
+write.csv(nbpredictions1, file = "NB_Predicted_Attrition.csv")
+```
+
+
+
+
+
+##KNN section
+
+```{r numeric maindata2}
+library(caTools)
+#convert some to numeric to work with knn, remove others that don't translate well???
+numcolumns <- unlist(lapply(maindata, is.numeric))
+num.maindata <- maindata
+
+num.maindata$Attrition <- as.numeric(num.maindata$Attrition)
+num.maindata$BusinessTravel <- as.numeric(num.maindata$BusinessTravel)
+num.maindata$Gender <- as.numeric(num.maindata$Gender)
+num.maindata$Over18 <- as.numeric(num.maindata$Over18)
+num.maindata$OverTime <- as.numeric(num.maindata$OverTime)
+
+numcolumns2 <- unlist(lapply(num.maindata, is.numeric)) #should only be 4 variables that won't translate well to numeric
+#remove department, education field, jobrole, and marital status
+num.maindata <- num.maindata[, numcolumns2 ] #should trim 36 vars down to 32
+
+set.seed(858) #same set as the NB, for comparison's sake
+sampleset = sample.split(num.maindata, SplitRatio = 0.7)
+num.traindata <- subset(num.maindata, sampleset == TRUE)
+num.testdata = subset(num.maindata, sampleset == FALSE)
+```
+
+
+```{r knn setup}
+library(class)
+
+num.training.definition <- num.traindata$Attrition #values to check knn guesses against? or ID?
+num.testing.definition <- num.testdata$Attrition
+
+knn1 <- knn(train = num.traindata, test = num.testdata, cl = num.training.definition,  k = 15) #taken from kvalue optimization
+
+ktest.acc <- sum(num.testing.definition == knn1)/NROW(num.testing.definition)
+ktest.acc
+
+```
+
+```{r optimize kvalue}
+kvalue = seq(1:50) #iterate accuracy through many kvalues
+kacc <- vector() #holds acc values
+kvar = 1 #counter
+
+for(i in kvalue)
+{
+  knn1 <- knn(train = num.traindata, test = num.testdata, cl = num.training.definition,  k = kvar)
+  ktest.acc <- sum(num.testing.definition == knn1)/NROW(num.testing.definition)
+  kacc <- c(kacc, ktest.acc)
+  
+  kvar = kvar+1
+}
+kopt = data.frame(kvalue, kacc)
+
+```
+
+```{r plot kvar acc}
+library(ggplot2)
+ggplot(kopt, aes(x = kvalue, y = kacc)) +
+  geom_smooth() +
+  labs(title="Model Accuracy vs K-Value",x="K-Value",y="Model Accuracy")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+Graph shows that optimal value of k is right around k = 15
+
+```{r get average acc}
+n = 100 #number of different split sets to process 
+m = seq(n)
+ka.list <- vector()
+
+for(i in m)
+{
+  sampleset = sample.split(num.maindata, SplitRatio = 0.7) #iterate through different splits
+  num.traindata <- subset(num.maindata, sampleset == TRUE)
+  num.testdata = subset(num.maindata, sampleset == FALSE)
+
+  num.training.definition <- num.traindata$Attrition #values to check knn guesses against? or ID?
+  num.testing.definition <- num.testdata$Attrition
+
+  knn1 <- knn(train = num.traindata, test = num.testdata, cl = num.training.definition,  k = 15) #taken from kvalue optimization
+
+  ktest.acc <- sum(num.testing.definition == knn1)/NROW(num.testing.definition)
+  ka.list <- c(ka.list, ktest.acc)
+}
+
+ka.mean <- mean(ka.list)
+sprintf("Splits Tested = %i", n)
+sprintf("Mean KNN Training Set Accuracy = %f", ka.mean <- mean(ka.list))
+```
+
+```{r plot splits}
+ggplot( mapping = aes(x = m, y = ka.list )) +
+  geom_smooth() +
+  geom_hline(yintercept = 0.84, color = "turquoise3") +
+  labs(title = "Permutated KNN accuracy", x = "Iteration Count", y = "Accuracy")
+
+```
+
+
+
+
+```{r sensitivity analysis2}
+library(caret)
+#reminder, sensitivity is the rate of correct "positive" guesses
+#specificity is the rate of correct "negative" classifications/guesses
+#confusionMatrix(knn1, as.factor(num.testing.definition))
+
+```
+
+```{r apply to nadata1}
+num.nadata1 <- nadata1
+#num.nadata1 <- num.nadata1[c(-5, -8, -16, -18)] #remove the same 4 vars
+num.nadata1 <- num.nadata1[c(-5, -8, -16, -18)] #remove the same vars
+
+num.nadata1 <- as.data.frame(lapply(num.nadata1, as.numeric))
+num.traindata = num.traindata[-3] #remove append column to match nadata???
+
+knn2 <- knn(train = num.traindata, test = num.nadata1, cl = num.training.definition,  k = 15) #generate predictions from nadata
+summary(knn2) 
+
+knnpredictions <- data.frame(nadata1$ID, knn2)#match predictions to nadata1 ID
+
+knnpredictions$knn2 <- ifelse(knnpredictions$knn2 == 1, "no", "yes") #shift binary guess to yes and no
+
+names(knnpredictions) <- c("ID", "PredictedAttrition")
+
+write.csv(knnpredictions, file = "KNN_Predicted_Attrition.csv")
+```
+
+
+##Attrition Prediction Analysis
+
+```{r compare stuff}
+#NB stuff
+sprintf("Mean Training Set Accuracy = %f", mean.train.acc)
+sprintf("Mean Testing Set Accuracy = %f", mean.test.acc)
+
+#KNN stuff
+
+sprintf("Mean KNN Training Set Accuracy = %f", ka.mean <- mean(ka.list))
+
+```
+
+
+
+#Modeling Employee Salaries
+Using linear regression
+
+##Salary Prediction Analysis
+```{r vis s1}
+ggplot(maindata, mapping = aes(x = JobRole, y = MonthlyIncome, color = Department)) +
+  geom_point() +
+  labs(title="Job Role Vs Salary",x="Job Role",y="Monthly Income ($)")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+# managers and research directors make the most, with HR, sales reps, lab techs, and research scientists making the least
+```
+
+```{r attrition test}
+ggplot(data = maindata) +
+  geom_boxplot(mapping = aes(x = Attrition, y = MonthlyIncome, color = JobRole))+
+  facet_wrap(~JobRole)
+#for most job roles, attrition isn't that much of a factor for monthly salary?
+```
+
+```{r vartest 4}
+ggplot(data = maindata) +
+  geom_point(mapping = aes(x = TotalWorkingYears, y = MonthlyIncome, color = JobRole))+
+  facet_wrap(~Department) +
+  labs(title = "Salary by Department and Job Role")
+#ok, looks significantish
+```
+
+```{r tentative model}
+#test with only a few vars
+linearmodel1 <- lm(MonthlyIncome ~ Age + TotalWorkingYears + JobRole + Department , data = traindata)
+summary(linearmodel1)
+#factors vs salary
+#age positive correlation
+#JobRole - manager, research director positive correlation
+#attrition - positive correlation?? Interesting, people who quit had higher salaries??
+```
+
+```{r attrition vs salary }
+ggplot(data = traindata, aes( MonthlyIncome, fill = Attrition))+
+  geom_histogram()
+#positive correlation between income and attrition may just be those few highly paid quitters
+```
+
+
+```{r trim outlier income}
+quitters <- grep("^Yes", traindata$Attrition)
+
+set1 <- traindata[quitters,]
+
+rich.quitters <- subset(set1, set1$MonthlyIncome > 15000) #find people with over 15000 monthly salary
+#remove these guys as outliers
+traindata2 <- traindata[-rich.quitters$ID,] 
+testdata2 <- testdata[-rich.quitters$ID,] 
+```
+
+```{r lr model 2}
+
+linearmodel2 <- lm(MonthlyIncome ~ Age + JobRole * Department + PerformanceRating + Gender + Education + JobLevel, data = traindata2)
+summary(linearmodel2)
+#r^2 of 0.81 w/3var
+#r^2 of 0.91 w/7var
+```
+
+```{r apply model}
+lm.pred1 <- predict.lm(linearmodel2, testdata, interval = "prediction", level = 0.95)
+summary(lm.pred1)
+p1 <- floor(as.data.frame(lm.pred1))
+```
+
+```{r rmse}
+library(Metrics)
+rmse(p1$fit, testdata$MonthlyIncome)
+
+```
+
+```{r apply to no salary data}
+
+lm.pred2 <- predict.lm(linearmodel2, nsdata1, interval = "prediction", level = 0.95)
+summary(lm.pred2)
+p2 <- floor(as.data.frame(lm.pred2))
+```
+
+```{r export best guess}
+setwd("D:/SMU/DS 6306 Doing Data Science/CaseStudy2DDS_6306")
+
+salary.predictions <- data.frame(testdata$ID, p2$fit)
+names(salary.predictions) <- c("ID", "Predicted Salary")
+
+write.csv(salary.predictions, file = "LR_Predicted_Salary.csv")
+
+```
+##Conclusions
+Highly influential variables were
+ - Salary
+ - Job Role
+ - Years Employed
+
+###Attrition
+Naive Bayes     
+Accuracy     = 0.84
+Sensitivity  = 0.9746          
+Specificity  = 0.1630 
+
+KNN
+Accuracy     = 0.8493
+Sensitivity  = 0.99563         
+Specificity  = 0.06977
+
+High sensitivity and low specificity indicates a high rate of true positives and false negatives, indicating overfitting of some kind. 
+
+###Salary
+Simple linear regression
+variables used were Age, JobRole, Department, and TotalWorkingYears
+R^2 of final model is 0.81
